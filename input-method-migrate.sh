@@ -48,9 +48,13 @@ managed_paths() {
 }
 
 stop_input_methods() {
-  command -v fcitx5-remote >/dev/null 2>&1 && fcitx5-remote -e >/dev/null 2>&1 || true
+  if command -v fcitx5-remote >/dev/null 2>&1; then
+    fcitx5-remote -e >/dev/null 2>&1 || true
+  fi
   pkill -TERM -u "$(id -u)" -x fcitx5 >/dev/null 2>&1 || true
-  command -v ibus >/dev/null 2>&1 && ibus exit >/dev/null 2>&1 || true
+  if command -v ibus >/dev/null 2>&1; then
+    ibus exit >/dev/null 2>&1 || true
+  fi
   sleep 1
 }
 
@@ -88,14 +92,15 @@ capture() {
       n=$1; sub(/:[^:]+$/, "", n); print n "\t" $2
     }' | sort -u >"$dest/packages.tsv"
   cut -f1 "$dest/packages.tsv" >"$dest/packages.txt"
-  printf 'created=%s\nhost=%s\nuser=%s\n' "$(date --iso-8601=seconds)" "$(hostname)" "$USER" +    >"$dest/snapshot-info.txt"
+  printf 'created=%s\nhost=%s\nuser=%s\n' \
+    "$(date --iso-8601=seconds)" "$(hostname)" "$USER" >"$dest/snapshot-info.txt"
 }
 
 remove_managed() {
   local rel
   while IFS= read -r rel; do
     [[ $rel == .* && $rel != *..* ]] || die "Unsafe managed path: $rel"
-    rm -rf -- "$HOME/$rel"
+    rm -rf -- "${HOME:?}/$rel"
   done < <(managed_paths)
 }
 
@@ -156,7 +161,7 @@ restore_snapshot() {
 
 validate_path() {
   local entry=$1 prefix=$2
-  [[ $entry == $prefix || $entry == "$prefix/"* ]] || die "Unexpected path: $entry"
+  [[ $entry == "$prefix" || $entry == "$prefix/"* ]] || die "Unexpected path: $entry"
   [[ $entry != /* && $entry != *'/../'* && $entry != '../'* && $entry != *'/..' ]] ||
     die "Unsafe archive path: $entry"
 }
@@ -193,7 +198,7 @@ install_missing() {
 }
 
 do_export() {
-  local output work root
+  local output work root checksums_tmp
   output=${1:-"$PWD/ubuntu24-input-method-$(hostname)-$(date +%Y%m%d-%H%M%S).tar.gz"}
   [[ $output == /* ]] || output="$PWD/$output"
   [[ ! -e $output ]] || die "Refusing to overwrite $output"
@@ -209,7 +214,10 @@ do_export() {
     printf 'source_arch=%s\n' "$(dpkg --print-architecture)"
     printf 'source_desktop=%s\n' "${XDG_CURRENT_DESKTOP:-unknown}"
   } >"$root/manifest.txt"
-  (cd "$root" && find . -type f ! -name CHECKSUMS -print0 | sort -z | xargs -0 sha256sum >CHECKSUMS)
+  checksums_tmp="$work/CHECKSUMS"
+  (cd "$root" && find . -type f ! -name CHECKSUMS -print0 | sort -z | xargs -0 sha256sum) \
+    >"$checksums_tmp"
+  mv -- "$checksums_tmp" "$root/CHECKSUMS"
   tar -C "$work" -czf "$output" input-method-bundle
   rm -rf -- "$work"; trap - EXIT
   log "Created: $output"
